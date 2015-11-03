@@ -1,0 +1,147 @@
+#!/bin/bash
+
+CONCURRENT=${CONCURRENT:-1}
+
+# Handle Defaults's defautls
+
+DEFAULT_RUNNER_URL=${DEFAULT_RUNNER_URL:-http://CI/}
+DEFAULT_RUNNER_TOKEN=${DEFAULT_RUNNER_TOKEN:-}
+DEFAULT_RUNNER_LIMIT=${DEFAULT_RUNNER_LIMIT:-0}
+DEFAULT_RUNNER_EXECUTOR=${DEFAULT_RUNNER_EXECUTOR:-shell}
+DEFAULT_RUNNER_BUILDS_DIR=${DEFAULT_RUNNER_BUILDS_DIR:-}
+
+# functions
+
+throw () {
+    echo "Error $1: $2"
+    exit $1
+}
+
+print_var () {
+    ID=$1
+    VARIABLE=$2
+
+    RUNNER_VARIABLE=RUNNER_${ID}_${VARIABLE}
+    DEFAULT_VARIABLE=DEFAULT_RUNNER_${VARIABLE}
+
+    [ ! -z "${!RUNNER_VARIABLE}" ] && {
+        echo "${!RUNNER_VARIABLE}"
+        return
+    }
+
+    [ ! -z "${!DEFAULT_VARIABLE}" ] && {
+        echo "${!DEFAULT_VARIABLE}"
+        return
+    }
+
+    exit 1
+}
+
+malformed_var () {
+    ID=$1
+    VARIABLE=$2
+
+    throw 1 "Could not configure variable $VARIABLE for runner $ID"
+}
+
+render_runner () {
+    ID=$1
+
+
+    NAME=$(print_var $ID NAME || echo "")
+    [ -z $NAME ] && NAME=RUNNER_${ID}
+    URL=$(print_var $ID URL) || malformed_var $ID URL
+    TOKEN=$(print_var $ID TOKEN) || malformed_var $ID TOKEN
+    LIMIT=$(print_var $ID LIMIT) || malformed_var $ID LIMIT
+    EXECUTOR=$(print_var $ID EXECUTOR) || malformed_var $ID EXECUTOR
+    BUILDS_DIR=$(print_var $ID BUILDS_DIR)
+    RUNNER=$(render_runner_$(print_var $ID EXECUTOR) $ID)
+
+cat <<EOF
+[[runners]]
+  name = "$NAME"
+  url = "$URL"
+  token = "$TOKEN"
+  limit = $LIMIT
+  executor = "$EXECUTOR"
+  builds_dir = "$BUILDS_DIR"
+$RUNNER
+EOF
+}
+
+render_runner_shell () {
+
+    _SHELL_=$(print_var $ID SHELL || echo "")
+    [ -z $_SHELL_ ] && _SHELL_=bash
+
+cat <<EOF
+  shell = "$_SHELL_"
+EOF
+}
+
+render_runner_docker () {
+
+    HOST=$(print_var $ID HOST || echo "")
+    IMAGE=$(print_var $ID IMAGE || echo "ubuntu-upstart:14.04")
+    PRIVILEGED=$(print_var $ID PRIVILEGED || echo "false")
+    DISABLE_CACHE=$(print_var $ID DISABLE_CACHE || echo "false")
+    CACHE_DIR=$(print_var $ID CACHE_DIR || echo "")
+
+cat <<EOF
+  [runners.docker]
+    host = "$HOST"
+    image = "$IMAGE"
+    privileged = $PRIVILEGED
+    disable_cache = $DISABLE_CACHE
+    cache_dir = "$CACHE_DIR"
+EOF
+}
+
+render_runner_ssh () {
+
+    HOST=$(print_var $ID HOST) || malformed_var $ID HOST
+    PORT=$(print_var $ID PORT || echo "22")
+    USER=$(print_var $ID USER || echo "root")
+    PASSWORD=$(print_var $ID PASSWORD) || malformed_var $ID PASSWORD
+
+cat <<EOF
+  [runners.ssh]
+    host = "$HOST"
+    port = "$PORT"
+    user = "$USER"
+    password = "$PASSWORD"
+EOF
+}
+
+render_runner_docker-ssh () {
+
+    HOST=$(print_var $ID HOST || echo "")
+    IMAGE=$(print_var $ID IMAGE || echo "ubuntu-upstart:14.04")
+    PRIVILEGED=$(print_var $ID PRIVILEGED || echo "false")
+    DISABLE_CACHE=$(print_var $ID DISABLE_CACHE || echo "false")
+    CACHE_DIR=$(print_var $ID CACHE_DIR || echo "")
+
+    PORT=$(print_var $ID PORT || echo "22")
+    USER=$(print_var $ID USER || echo "root")
+    PASSWORD=$(print_var $ID PASSWORD || echo "docker.io")
+
+cat <<EOF
+  [runners.docker]
+    host = "$HOST"
+    image = "$IMAGE"
+    privileged = $PRIVILEGED
+    disable_cache = $DISABLE_CACHE
+    cache_dir = "$CACHE_DIR"
+  [runners.ssh]
+    port = "$PORT"
+    user = "$USER"
+    password = "$PASSWORD"
+EOF
+}
+
+echo "concurrent = $CONCURRENT"
+echo
+for i in `seq 1 $CONCURRENT`; do
+    render_runner $i
+    [ $? -ne 0 ] && exit $?
+done

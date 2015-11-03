@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# Replace config
+cat-gitlab-ci-multi-runner-config > /etc/gitlab-runner/config.toml
+
+exec gitlab-ci-multi-runner $*
